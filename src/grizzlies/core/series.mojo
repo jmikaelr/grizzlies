@@ -1,9 +1,9 @@
-from memory import memset_zero, memset
+from memory import memset_zero
 from sys.info import simd_width_of
 from algorithm.functional import vectorize
 
 struct Series[
-        _dtype: DType, _size: Int, _name: Optional[String] = None
+        _dtype: DType, _size: Int, _name: Optional[String]=None
 ](
     AnyType & Writable & Stringable
 ):
@@ -18,8 +18,7 @@ struct Series[
     @always_inline("nodebug")
     fn __init__(out self):
         self._data = UnsafePointer[Scalar[_dtype]].alloc(_size)
-        # memset_zero(self._data, _size)
-        memset(self._data, 1, _size)
+        memset_zero(self._data, _size) # Have to memset otherwise it's not initialised?
         self._own_data = True
 
     @always_inline("nodebug")
@@ -47,17 +46,145 @@ struct Series[
     # ----------------------Operations ---------------------- #
     # ------------------------------------------------------- #
 
-    fn __add__[count: Int, //](self, *rhs: Series[_dtype, _size]) -> Series[_dtype, _size]:
+    # ------------------- Series & Scalars ------------------ #
+
+    fn __add__(self, rhs: Scalar[_dtype]) -> Self:
         var p = UnsafePointer[Scalar[_dtype]].alloc(_size)
         @parameter
         fn closure[simd_width: Int](i: Int):
             a = self._data.load[width=simd_width](i)
-            @parameter
-            for rh in range(count):
-                b = rhs[i]._data.load[width=simd_width](i)
-                p.store(i, a + b)
+            p.store[width=simd_width](i, a + rhs)
         vectorize[closure, Self.simd_width](_size)
-        return Series[_dtype, _size](p)
+        return Self(p)
+
+    fn __iadd__(self, rhs: Scalar[_dtype]):
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            self._data.store(i, a + rhs)
+        vectorize[closure, Self.simd_width](_size)
+
+    fn __sub__(self, rhs: Scalar[_dtype]) -> Self:
+        var p = UnsafePointer[Scalar[_dtype]].alloc(_size)
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            p.store(i, a - rhs)
+            vectorize[closure, Self.simd_width](_size)
+        return Self(p)
+
+    fn __isub__(self, rhs: Scalar[_dtype]):
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            self._data.store(i, a - rhs)
+        vectorize[closure, Self.simd_width](_size)
+
+    fn __mul__(self, rhs: Scalar[_dtype]) -> Self:
+        var p = UnsafePointer[Scalar[_dtype]].alloc(_size)
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            p.store(i, a * rhs)
+            vectorize[closure, Self.simd_width](_size)
+        return Self(p)
+
+    fn __imul__(self, rhs: Scalar[_dtype]):
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            self._data.store(i, a * rhs)
+        vectorize[closure, Self.simd_width](_size)
+
+    fn __div__(self, rhs: Scalar[_dtype]) -> Self:
+        var p = UnsafePointer[Scalar[_dtype]].alloc(_size)
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            p.store(i, a / rhs)
+            vectorize[closure, Self.simd_width](_size)
+        return Self(p)
+
+    fn __idiv__(self, rhs: Scalar[_dtype]):
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            self._data.store(i, a / rhs)
+        vectorize[closure, Self.simd_width](_size)
+
+    # ------------------- Series & Series ------------------- #
+
+    fn __add__(self, rhs: Self) -> Self:
+        var p = UnsafePointer[Scalar[_dtype]].alloc(_size)
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            b = rhs._data.load[width=simd_width](i)
+            p.store(i, a + b)
+        vectorize[closure, Self.simd_width](_size)
+        return Self(p)
+
+    fn __iadd__(self, rhs: Self):
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            b = rhs._data.load[width=simd_width](i)
+            self._data.store(i, a + b)
+        vectorize[closure, Self.simd_width](_size)
+
+    fn __sub__(self, rhs: Self) -> Self:
+        var p = UnsafePointer[Scalar[_dtype]].alloc(_size)
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            b = rhs._data.load[width=simd_width](i)
+            p.store(i, a - b)
+            vectorize[closure, Self.simd_width](_size)
+        return Self(p)
+
+    fn __isub__(self, rhs: Self):
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            b = rhs._data.load[width=simd_width](i)
+            self._data.store(i, a - b)
+        vectorize[closure, Self.simd_width](_size)
+
+    fn __mul__(self, rhs: Self) -> Self:
+        var p = UnsafePointer[Scalar[_dtype]].alloc(_size)
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            b = rhs._data.load[width=simd_width](i)
+            p.store(i, a * b)
+            vectorize[closure, Self.simd_width](_size)
+        return Self(p)
+
+    fn __imul__(self, rhs: Self):
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            b = rhs._data.load[width=simd_width](i)
+            self._data.store(i, a * b)
+        vectorize[closure, Self.simd_width](_size)
+
+    fn __div__(self, rhs: Self) -> Self:
+        var p = UnsafePointer[Scalar[_dtype]].alloc(_size)
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            b = rhs._data.load[width=simd_width](i)
+            p.store(i, a / b)
+            vectorize[closure, Self.simd_width](_size)
+        return Self(p)
+
+    fn __idiv__(self, rhs: Self):
+        @parameter
+        fn closure[simd_width: Int](i: Int):
+            a = self._data.load[width=simd_width](i)
+            b = rhs._data.load[width=simd_width](i)
+            self._data.store(i, a / b)
+        vectorize[closure, Self.simd_width](_size)
 
     # ------------------------------------------------------- #
     # ----------------------- Helpers ----------------------- #
@@ -105,4 +232,6 @@ struct Series[
         return str_data
 
 fn main():
-    var s = Series[DType.float32, 60]()
+    var s = Series[DType.float32, 40320942]()
+    t = s + 3
+    print(t.tail())
