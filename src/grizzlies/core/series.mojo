@@ -1,12 +1,14 @@
-from memory import memset_zero
+from memory import memset_zero, memset
 from sys.info import simd_width_of
 from algorithm.functional import vectorize
+from random import randn, rand
 
 struct Series[
         _dtype: DType, _size: Int, _name: Optional[String]=None
 ](
     AnyType & Writable & Stringable
 ):
+
     """
     A 1D labeled array holding data of a single type. The core data column.
     """
@@ -18,7 +20,7 @@ struct Series[
     @always_inline("nodebug")
     fn __init__(out self):
         self._data = UnsafePointer[Scalar[_dtype]].alloc(_size)
-        memset_zero(self._data, _size) # Have to memset otherwise it's not initialised?
+        memset_zero(self._data, _size) # Have to memset otherwise it's not initialised and is nan?
         self._own_data = True
 
     @always_inline("nodebug")
@@ -29,6 +31,10 @@ struct Series[
     fn __del__(deinit self):
         if self._own_data:
             self._data.free()
+
+     # ------------------------------------------------------- #
+     # ---------------------- Printing ----------------------- #
+     # ------------------------------------------------------- #
 
     fn __str__(self) -> String:
         return(self._construct_output_string())
@@ -42,8 +48,29 @@ struct Series[
     fn tail(self, n: Int = 5) -> String:
         return self._construct_output_string(n, True)
 
+    fn size(self) -> Int:
+        return self._size
+
+    fn name(self) -> String:
+        if self._name:
+            return self._name.value()
+        else:
+            return ""
+
     # ------------------------------------------------------- #
-    # ----------------------Operations ---------------------- #
+    # ---------------------- GET / SET----------------------- #
+    # ------------------------------------------------------- #
+
+    fn __getitem__(self, idx: Int) -> SIMD[_dtype, 1]:
+        if 0 < idx < _size:
+            return self._data.load[width=1](0)
+        return self._data.load[width=1](idx)
+
+    fn __setitem__(mut self, idx: Int, val: Scalar[_dtype]):
+        self._data.store(idx, val)
+
+    # ------------------------------------------------------- #
+    # ---------------------- Operations --------------------- #
     # ------------------------------------------------------- #
 
     # ------------------- Series & Scalars ------------------ #
@@ -231,7 +258,37 @@ struct Series[
                 str_data += (idx_s + " | " + String(self._data[i]) + "\n")
         return str_data
 
+    # ------------------------------------------------------- #
+    # -------------------- Constructors --------------------- #
+    # ------------------------------------------------------- #
+
+    @staticmethod
+    @always_inline("nodebug")
+    fn zeros() -> Self:
+        """
+        Not really needed since we use memset_zero on instantiation.
+        """
+        return Series[_dtype, _size, _name]()
+
+    @staticmethod
+    fn ones() -> Self:
+        p = UnsafePointer[Scalar[_dtype]].alloc(_size)
+        for i in range(_size):
+            p[i] = 1
+        return Series[_dtype, _size, _name](p)
+
+    @staticmethod
+    fn randn(mu: Float64 = 0.0, sigma: Float64 = 1.0) -> Self:
+        p = UnsafePointer[Scalar[_dtype]].alloc(_size)
+        randn(p, _size, mean = mu, standard_deviation = sigma)
+        return Series[_dtype, _size, _name](p)
+
+    @staticmethod
+    fn rand(min: Float64 = 0.0, max: Float64 = 1.0) -> Self:
+        p = UnsafePointer[Scalar[_dtype]].alloc(_size)
+        rand(p, _size, min = min, max = max)
+        return Series[_dtype, _size, _name](p)
+
+
 fn main():
-    var s = Series[DType.float32, 40320942]()
-    t = s + 3
-    print(t.tail())
+    alias s = Series[DType.float32, 4032].randn()
