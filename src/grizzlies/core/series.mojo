@@ -3,20 +3,28 @@ from sys.info import simd_width_of
 from algorithm.functional import vectorize
 from random import randn, rand
 
+
 fn _series_construction_checks[size: Int]():
     constrained[size >= 0, "number of elements in `Series` must be >= 0"]()
 
+
+struct PrintOptions:
+    ...
+
+
 struct SeriesView[dtype: DType](Movable & Stringable & Writable):
-    """
-    Todo.
-    """
     var base: UnsafePointer[Scalar[dtype]]
     var len: Int
     var offset: Int
     var stride: Int
 
-    fn __init__(out self, base: UnsafePointer[Scalar[dtype]], offset: Int = 0, len: Int = 0,
-                stride: Int = 1):
+    fn __init__(
+        out self,
+        base: UnsafePointer[Scalar[dtype]],
+        offset: Int = 0,
+        len: Int = 0,
+        stride: Int = 1,
+    ):
         self.base = base
         self.len = len
         self.offset = offset
@@ -24,11 +32,15 @@ struct SeriesView[dtype: DType](Movable & Stringable & Writable):
 
     fn debug_print(self):
         print(
-            "base", self.base,
-            "\nlen", self.len,
-            "\noffset", self.offset,
-            "\nstride", self.stride
-            )
+            "base",
+            self.base,
+            "\nlen",
+            self.len,
+            "\noffset",
+            self.offset,
+            "\nstride",
+            self.stride,
+        )
 
     fn _construct_view(self) -> String:
         var str: String = "SeriesView("
@@ -36,7 +48,8 @@ struct SeriesView[dtype: DType](Movable & Stringable & Writable):
             addr = self.base + i * self.stride
             print(addr)
             str += String(self.base[self.offset + i * self.stride])
-            if i != self.len: str += ", "
+            if i != self.len:
+                str += ", "
         str += ")"
         return str
 
@@ -46,11 +59,24 @@ struct SeriesView[dtype: DType](Movable & Stringable & Writable):
     fn write_to(self, mut writer: Some[Writer]):
         writer.write(self._construct_view())
 
+    fn values(self) -> List[Scalar[dtype]]:
+        """
+        Creates a copy of the data and return it.
+        """
+        n = self.len
+        var out = List[Scalar[dtype]](capacity=n)
+        for i in range(n):
+            pos = self.offset + i * self.stride
+            out.insert(i, self.base[pos])
+
+        return out^
+
+
 struct Series[
     dtype: DType,
     size: Int,
     name: Optional[String] = None,
-    address_space: AddressSpace = AddressSpace.GENERIC, # AddressSpace(0)
+    address_space: AddressSpace = AddressSpace.GENERIC,  # AddressSpace(0)
     mut: Bool = True,
     origin: Origin[mut] = Origin[mut].cast_from[MutableAnyOrigin],
 ](Writable & Stringable & Sized):
@@ -75,6 +101,9 @@ struct Series[
                 "or pass the keyword argument 'uninitialized=True'."
             ),
         ]()
+        __mlir_op.`lit.ownership.mark_initialized`(__get_mvalue_as_litref(self))
+
+    fn __init__(out self, *, uninitialized: Bool):
         __mlir_op.`lit.ownership.mark_initialized`(__get_mvalue_as_litref(self))
 
     @always_inline
@@ -122,9 +151,24 @@ struct Series[
         return self._view(idx)
 
     fn __getitem__(self, slice: Slice) -> SeriesView[dtype]:
-        start = slice.start.value()
-        end = slice.end.value()
-        step = slice.step.value()
+        # FIX THIS
+        if slice.start and slice.end and slice.step:
+            start = slice.start.value()
+            end = slice.end.value() - 1
+            step = slice.step.value()
+        elif slice.start and slice.end:
+            start = slice.start.value()
+            end = slice.end.value() - 1
+            step = 1
+        elif slice.start:
+            start = slice.start.value()
+            end = size - start - 1
+            step = 1
+        else:
+            start = 0
+            end = size - 1
+            step = 1
+
         return self._view(start, end, step)
 
     fn __setitem__(mut self, idx: Int, val: Scalar[dtype]):
@@ -162,6 +206,7 @@ struct Series[
         fn closure[simd_width: Int](i: Int):
             a = self._ptr.load[width=simd_width](i)
             p.store(i, a - rhs)
+
         vectorize[closure, Self.SIMD_WIDTH](size)
 
         return Self(p)
@@ -181,6 +226,7 @@ struct Series[
         fn closure[simd_width: Int](i: Int):
             a = self._ptr.load[width=simd_width](i)
             p.store(i, a * rhs)
+
         vectorize[closure, Self.SIMD_WIDTH](size)
 
         return Self(p)
@@ -200,6 +246,7 @@ struct Series[
         fn closure[simd_width: Int](i: Int):
             a = self._ptr.load[width=simd_width](i)
             p.store(i, a / rhs)
+
         vectorize[closure, Self.SIMD_WIDTH](size)
 
         return Self(p)
@@ -243,6 +290,7 @@ struct Series[
             a = self._ptr.load[width=simd_width](i)
             b = rhs._ptr.load[width=simd_width](i)
             p.store(i, a - b)
+
         vectorize[closure, Self.SIMD_WIDTH](size)
 
         return Self(p)
@@ -264,6 +312,7 @@ struct Series[
             a = self._ptr.load[width=simd_width](i)
             b = rhs._ptr.load[width=simd_width](i)
             p.store(i, a * b)
+
         vectorize[closure, Self.SIMD_WIDTH](size)
 
         return Self(p)
@@ -285,6 +334,7 @@ struct Series[
             a = self._ptr.load[width=simd_width](i)
             b = rhs._ptr.load[width=simd_width](i)
             p.store(i, a / b)
+
         vectorize[closure, Self.SIMD_WIDTH](size)
 
         return Self(p)
@@ -332,7 +382,9 @@ struct Series[
                 + "\n"
             )
         else:
-            str = "name='' shape=(" + String(size) + ",) " + String(dtype) + "\n"
+            str = (
+                "name='' shape=(" + String(size) + ",) " + String(dtype) + "\n"
+            )
         if n and tail:
             for i in range(size - n.value(), size):
                 idx_s = String(i)
@@ -353,7 +405,9 @@ struct Series[
                 str += idx_s + " | " + String(self._ptr[i]) + "\n"
         return str
 
-    fn _view(self, offset: Int = 0, len: Int = 0, stride: Int = 1) -> SeriesView[dtype]:
+    fn _view(
+        self, offset: Int = 0, len: Int = 0, stride: Int = 1
+    ) -> SeriesView[dtype]:
         view = SeriesView(self._ptr, offset, len, stride)
         return view^
 
@@ -371,6 +425,7 @@ struct Series[
     @staticmethod
     fn ones() -> Self:
         p = UnsafePointer[Scalar[dtype]].alloc(size)
+
         @parameter
         for i in range(size):
             p[i] = 1
@@ -389,15 +444,40 @@ struct Series[
         return Self(p)
 
     @staticmethod
-    fn arrange(start: Int = 1, step: Int = 1) -> Self:
+    fn arange(start: Int = 0, step: Float64 = 1) -> Self:
         p = UnsafePointer[Scalar[dtype]].alloc(size)
+        @parameter
         for i in range(size):
-            p[i] = start + i * step
+            p[i] = Scalar[dtype](start + i * step)
         return Self(p)
 
+    @staticmethod
+    fn linspace(start: Scalar[dtype], stop: Scalar[dtype]) -> Self:
+        p = UnsafePointer[Scalar[dtype]].alloc(size)
 
+        @parameter
+        if size == 1:
+            p[0] = start
+        else:
+            step = (stop - start) / Scalar[dtype](size - 1)
+            @parameter
+            for i in range(size):
+                p[i] = start + step * Scalar[dtype](i)
+        return Self(p)
+
+    @staticmethod
+    fn full(value: Scalar[dtype]) -> Self:
+        p = UnsafePointer[Scalar[dtype]].alloc(size)
+
+        @parameter
+        for i in range(size):
+            p[i] = value
+        return Self(p)
 
 fn main() raises:
     s = Series[DType.float32, 4032].randn()
     a = Series[DType.float32, 5].ones()
-    p = Series[DType.float32, 10].arrange(1)
+    p = Series[DType.float32, 10].arange(0, 0.2)
+    t = Series[DType.float32, 10].full(42)
+    lin = Series[DType.float32, 10].linspace(3.2, 4.3914)
+    print(lin)
