@@ -3,13 +3,23 @@ from sys.info import simd_width_of
 from algorithm.functional import vectorize
 from random import randn, rand
 
+alias dtype = DType.float32
 
 fn _series_construction_checks[size: Int]():
     constrained[size >= 0, "number of elements in `Series` must be >= 0"]()
 
 
-struct PrintOptions:
-    ...
+struct PrintOptions(ImplicitlyCopyable):
+    var digits: Int
+
+    fn __init__(out self, digits: Int = 3):
+        self.digits = digits
+
+    fn _set_digits(mut self, digits: Int):
+        self.digits = digits
+
+    fn _get_digits(self) -> Int:
+        return self.digits
 
 
 struct SeriesView[dtype: DType](Movable & Stringable & Writable):
@@ -17,9 +27,11 @@ struct SeriesView[dtype: DType](Movable & Stringable & Writable):
     var len: Int
     var offset: Int
     var stride: Int
+    var _print_options: PrintOptions
 
     fn __init__(
         out self,
+        print_options: PrintOptions,
         base: UnsafePointer[Scalar[dtype]],
         offset: Int = 0,
         len: Int = 0,
@@ -29,6 +41,7 @@ struct SeriesView[dtype: DType](Movable & Stringable & Writable):
         self.len = len
         self.offset = offset
         self.stride = stride
+        self._print_options = print_options
 
     fn debug_print(self):
         print(
@@ -44,10 +57,12 @@ struct SeriesView[dtype: DType](Movable & Stringable & Writable):
 
     fn _construct_view(self) -> String:
         var str: String = "SeriesView("
+        var data: Scalar[dtype]
+        var digits: Int = self._print_options._get_digits()
         for i in range(self.len + 1):
             addr = self.base + i * self.stride
-            print(addr)
-            str += String(self.base[self.offset + i * self.stride])
+            data = round(self.base[self.offset + i * self.stride], digits)
+            str += String(data)
             if i != self.len:
                 str += ", "
         str += ")"
@@ -89,6 +104,7 @@ struct Series[
     alias IDX_WIDTH: Int = Self._digits(size)
     var _ptr: UnsafePointer[Scalar[dtype]]
     var _own_ptr: Bool
+    var _print_options: PrintOptions
 
     @always_inline
     fn __init__(out self):
@@ -111,6 +127,7 @@ struct Series[
         _series_construction_checks[size]()
         self._ptr = data
         self._own_ptr = True
+        self._print_options = PrintOptions()
 
     fn __del__(deinit self):
         @parameter
@@ -143,6 +160,12 @@ struct Series[
     # ------------------------------------------------------- #
     # ---------------------- GET / SET----------------------- #
     # ------------------------------------------------------- #
+
+    fn set_digits(mut self, digits: Int):
+        self._print_options._set_digits(digits)
+
+    fn get_digits(self) -> Int:
+        return self._print_options._get_digits()
 
     fn get_ptr(self) -> UnsafePointer[Scalar[dtype]]:
         return self._ptr
@@ -369,6 +392,8 @@ struct Series[
     fn _construct_output_string(
         self, n: Optional[Int] = None, tail: Bool = False
     ) -> String:
+        var digits = self._print_options._get_digits()
+        var data: Scalar[dtype]
         var str: String
         if self.name:
             str = (
@@ -389,26 +414,30 @@ struct Series[
             for i in range(size - n.value(), size):
                 idx_s = String(i)
                 pad = Self.IDX_WIDTH - len(idx_s)
+                data = round(self._ptr[i], digits)
                 str += " " * pad
-                str += idx_s + " | " + String(self._ptr[i]) + "\n"
+                str += idx_s + " | " + String(data) + "\n"
         elif n:
             for i in range(n.value()):
                 idx_s = String(i)
                 pad = Self.IDX_WIDTH - len(idx_s)
+                data = round(self._ptr[i], digits)
                 str += " " * pad
-                str += idx_s + " | " + String(self._ptr[i]) + "\n"
+                str += idx_s + " | " + String(data) + "\n"
         else:
             for i in range(size):
                 idx_s = String(i)
                 pad = Self.IDX_WIDTH - len(idx_s)
                 str += " " * pad
-                str += idx_s + " | " + String(self._ptr[i]) + "\n"
+                data = round(self._ptr[i], digits)
+                print(data)
+                str += idx_s + " | " + String(data) + "\n"
         return str
 
     fn _view(
         self, offset: Int = 0, len: Int = 0, stride: Int = 1
     ) -> SeriesView[dtype]:
-        view = SeriesView(self._ptr, offset, len, stride)
+        view = SeriesView(self._print_options, self._ptr, offset, len, stride)
         return view^
 
     # ------------------------------------------------------- #
@@ -446,6 +475,7 @@ struct Series[
     @staticmethod
     fn arange(start: Int = 0, step: Float64 = 1) -> Self:
         p = UnsafePointer[Scalar[dtype]].alloc(size)
+
         @parameter
         for i in range(size):
             p[i] = Scalar[dtype](start + i * step)
@@ -460,6 +490,7 @@ struct Series[
             p[0] = start
         else:
             step = (stop - start) / Scalar[dtype](size - 1)
+
             @parameter
             for i in range(size):
                 p[i] = start + step * Scalar[dtype](i)
@@ -474,10 +505,11 @@ struct Series[
             p[i] = value
         return Self(p)
 
+
 fn main() raises:
-    s = Series[DType.float32, 4032].randn()
-    a = Series[DType.float32, 5].ones()
-    p = Series[DType.float32, 10].arange(0, 0.2)
-    t = Series[DType.float32, 10].full(42)
-    lin = Series[DType.float32, 10].linspace(3.2, 4.3914)
-    print(lin)
+    s = Series[dtype, 4032].randn()
+    a = Series[dtype, 5].ones()
+    p = Series[dtype, 10].arange(0, 0.2)
+    t = Series[dtype, 10].full(42)
+    lin = Series[dtype, 10].linspace(3.2, 43914)
+    print(lin[2:4])
